@@ -19,25 +19,30 @@ output:
 
 # 20 minute talk!!
 
+library(gt)
 library(aorsf)
 library(plotly)
 library(ggforce)
 library(simsurv)
+library(survival)
 library(collapse)
 library(tidyverse)
 library(yardstick)
+library(tidyselect)
+library(SurvMetrics)
 library(palmerpenguins)
 library(randomForestSRC)
 
-select <- collapse::fselect
-mutate <- collapse::fmutate
-
-vi_sim_run <- function(n, p, runs){
+vi_sim_run <- function(n, p, runs,
+                       correlated = TRUE,
+                       x_effect = 1/5,
+                       z_effect = 0,
+                       categorical = FALSE){
  
  names_x <- paste0("x", seq(p))
  names_z <- paste0("z", seq(p))
  
- betas <- c(rep(1/5, times = p), rep(0, times = p))
+ betas <- c(rep(x_effect, times = p), rep(z_effect, times = p))
  
  names(betas) <- c(names_x, names_z)
  
@@ -54,7 +59,10 @@ vi_sim_run <- function(n, p, runs){
   for(j in seq(p)){
    
    predictors[, names_x[j] ] <- rnorm(n)
-   predictors[, names_z[j] ] <- predictors[, names_x[j] ] + rnorm(n)
+   if(correlated)
+    predictors[, names_z[j] ] <- predictors[, names_x[j] ] + rnorm(n)
+   else 
+    predictors[, names_z[j] ] <- rnorm(n)
    
   }
   
@@ -68,6 +76,26 @@ vi_sim_run <- function(n, p, runs){
   
   data <- cbind(y_surv, predictors)
   
+  if(categorical){
+   
+   for(j in c(names_x, names_z)){
+    
+    q <- quantile(data[[j]], probs = c(0,1,2,3,4)/4)
+    
+    data[[j]] <- cut(data[[j]], 
+                     breaks = q, 
+                     include.lowest = TRUE)
+    data[[j]] <- as.factor(data[[j]])
+    data[[j]] <- factor(data[[j]],
+                        levels = levels(data[[j]]),
+                        labels = paste("group", 
+                                       seq(length(levels(data[[j]]))),
+                                       sep = '_'))
+    
+   }
+
+  }
+  
   fit_0 <- rfsrc(Surv(eventtime, status) ~ ., 
                  data = select(data, -id), 
                  importance = 'permute', 
@@ -78,7 +106,7 @@ vi_sim_run <- function(n, p, runs){
                     importance = 'anova')
   
   permute_0[[i]] <- fit_0$importance
-  anova[[i]] <- fit_aorsf$importance
+  anova[[i]] <- orsf_vi(fit_aorsf, importance = 'anova')
   permute[[i]] <- orsf_vi(fit_aorsf, importance = 'permute')
   negate[[i]] <- orsf_vi(fit_aorsf, importance = 'negate')
   
@@ -185,10 +213,8 @@ background-position: 85% 72.5%
 
 - May be **axis-based** or **oblique** (more on this soon)
 
---
-
 .pull-left[
-We'll demonstrate the mechanics of decision trees by developing a prediction rule to classify penguin<sup>1</sup> species (chinstrap, gentoo, or adelie) based on bill and flipper length.
+We'll demonstrate the mechanics of decision trees by developing a prediction rule to classify penguin<sup>1</sup> species (chinstrap, gentoo, or adelie) based on bill depth and bill length.
 ]
 
 .footnote[
@@ -600,26 +626,27 @@ class: center, middle, inverse
 
 ## Oblique random survival forests 
 
-.large[**Recipe**:]
+**Recipe**:
 
-- .large[Combine oblique trees with survival trees]
+- Combine oblique trees with survival trees
 
-- .large[Follow Leo Breiman's rules for random forests]
+- Follow Leo Breiman's rules for random forests
 
-- .large[Sprinkle on Torsten Hothorn's early stopping criteria]
+- Sprinkle on Torsten Hothorn's early stopping criteria
+
 
 
 <br/>
 
-.large[**Software**:]
+**Software**:
 
-- .large[Original R package: *obliqueRSF*.]
+- Original R package: *obliqueRSF*.
 
-- .large[Successor R package: *aorsf*]
+- Successor R package: *aorsf*
 
 .footnote[
 
-*obliqueRSF* paper [here](https://projecteuclid.org/journals/annals-of-applied-statistics/volume-13/issue-3/Oblique-random-survival-forests/10.1214/19-AOAS1261.full) ---- *aorsf* paper [here](https://joss.theoj.org/papers/10.21105/joss.04705) ---- *aorsf* documention [here](https://docs.ropensci.org/aorsf/) ---- benchmark paper [here](https://arxiv.org/abs/2208.01129)
+*obliqueRSF* paper [here](https://projecteuclid.org/journals/annals-of-applied-statistics/volume-13/issue-3/Oblique-random-survival-forests/10.1214/19-AOAS1261.full) --- *aorsf* paper [here](https://joss.theoj.org/papers/10.21105/joss.04705) --- *aorsf* documention [here](https://docs.ropensci.org/aorsf/) --- benchmark [here](https://arxiv.org/abs/2208.01129)
 
 ]
 
@@ -627,31 +654,33 @@ class: center, middle, inverse
 
 ## Oblique random survival forests
 
-.large[Key things about *obliqueRSF*:]
+Key things about *obliqueRSF*:
 
-- .large[High prediction accuracy]
+- High prediction accuracy
 
-- .large[High computational cost]
+- High computational cost
 
-- .large[Few tools for interpretation (no variable importance)]
+- Few tools for interpretation (no variable importance)
+
 
 ---
 
 ## Oblique random survival forests
 
-.large[Key things about *aorsf*:]
+Key things about *aorsf*:
 
-- .large[High prediction accuracy]
+- High prediction accuracy
 
-- .large[Comparable efficiency to `ranger` and `randomForestSRC`]
+- Comparable efficiency to `ranger` and `randomForestSRC`
 
-- .large[Three methods to compute variable importance]
+- Three methods to compute variable importance
 
-- .large[fast partial dependence]
+- fast partial dependence
 
-- .large[fast individual conditional expectation curves]
+- fast individual conditional expectation curves
 
-- .large[Integrated into *tidymodels* and *mlr3*]
+- Integrated into *tidymodels* and *mlr3*
+
 
 ---
 
@@ -907,6 +936,18 @@ Importance of a predictor = the proportion of times its p-value is low.
 
 ## Permutation importance
 
+For each predictor:
+
+1. Permute predictor values
+
+1. Measure prediction error with permuted values
+
+Importance of a predictor = increase in prediction error after permutation
+
+---
+
+## Permutation importance
+
 ```{r permute-importance-1}
 
 penguins_permute_init <- mutate(penguins_scaled, frame = 1)
@@ -963,59 +1004,15 @@ plot_ly(penguins_permute,
 
 ---
 
-## Permutation importance
+## Negation importance
 
-```{r permute-importance-2}
+For each predictor:
 
-penguins_permute_bill_depth <- penguins_permute_init %>% 
- mutate(
-  bill_depth_mm = sample(bill_depth_mm, size = nrow(.)),
-  frame = 2
- )
+1. Multiply coefficient in linear combination by -1
 
-penguins_permute <- bind_rows(
- penguins_permute_init,
- penguins_permute_bill_depth
-)
+1. Measure prediction error with permuted values
 
-plot_ly(penguins_permute, 
-        x = ~ bill_length_mm, 
-        y = ~ bill_depth_mm,
-        color = ~ species,
-        symbol = ~ species,
-        frame = ~ frame,
-        colors = cols,
-        width = plotly_width, 
-        height = plotly_height) %>%
- add_markers() %>%
- add_polygons(data = poly_1_oblique,
-              inherit = FALSE,
-              x = ~ x, 
-              y = ~ y,
-              color = I(cols[1]),
-              alpha = I(1/5)) %>%
- add_polygons(data = poly_2_oblique,
-              inherit = FALSE,
-              x = ~ x, 
-              y = ~ y,
-              color = I('purple'),
-              alpha = I(1/5)) %>% 
- add_polygons(data = poly_3_oblique,
-              inherit = FALSE,
-              x = ~ x, 
-              y = ~ y,
-              color = I('cyan4'),
-              alpha = I(1/5)) %>% 
- animation_opts(frame = 1000, transition = 1000) %>%
- animation_slider(hide = TRUE) %>% 
- animation_button(
-  x = 0.95, xanchor = "right", 
-  y = 0.05, yanchor = "bottom",
-  label = "Permute\nbill depth"
- ) %>% 
- print_plotly()
-
-```
+Importance of a predictor = increase in prediction error after negation
 
 ---
 
@@ -1043,7 +1040,6 @@ poly_3_orig <- poly_3_oblique %>%
 poly_3_flip_x <- mutate(poly_3_orig, x = -x, f = 2)
 
 poly_3 <- bind_rows(poly_3_orig, poly_3_flip_x)
-
 
 plot_ly(penguins_scaled, 
         x = ~ bill_length_mm, 
@@ -1081,66 +1077,6 @@ plot_ly(penguins_scaled,
   x = 0.95, xanchor = "right", 
   y = 0.05, yanchor = "bottom",
   label = "Negate\nbill depth\ncoefficients"
- ) %>% 
- print_plotly()
-
-```
-
----
-
-## Negation importance
-
-```{r negate-importance-2}
-
-poly_1_flip_y <- mutate(poly_1_orig, y = -y, f = 2)
-
-poly_1 <- bind_rows(poly_1_orig, poly_1_flip_y)
-
-poly_2_flip_y <- mutate(poly_2_orig, y = -y, f = 2)
-
-poly_2 <- bind_rows(poly_2_orig, poly_2_flip_y)
-
-poly_3_flip_y <- mutate(poly_3_orig, y = -y, f = 2)
-
-poly_3 <- bind_rows(poly_3_orig, poly_3_flip_y)
-
-
-plot_ly(penguins_scaled, 
-        x = ~ bill_length_mm, 
-        y = ~ bill_depth_mm,
-        color = ~ species,
-        symbol = ~ species,
-        colors = cols,
-        width = plotly_width, 
-        height = plotly_height) %>%
- add_markers() %>%
- add_polygons(data = poly_1,
-              inherit = FALSE,
-              x = ~ x, 
-              y = ~ y,
-              frame = ~ f,
-              color = I(cols[1]),
-              alpha = I(1/5)) %>%
- add_polygons(data = poly_2,
-              inherit = FALSE,
-              x = ~ x, 
-              y = ~ y,
-              frame = ~ f,
-              color = I(cols[2]),
-              alpha = I(1/5)) %>% 
- add_polygons(data = poly_3,
-              inherit = FALSE,
-              x = ~ x, 
-              y = ~ y,
-              frame = ~ f,
-              color = I(cols[3]),
-              alpha = I(1/5)) %>% 
- animation_opts(frame = 1000, transition = 1000) %>%
- animation_slider(hide = TRUE) %>% 
- animation_button(
-  x = 0.95, xanchor = "right", 
-  y = 0.05, yanchor = "bottom",
-  label = "Negate\nbill length\ncoefficients"
  ) %>% 
  print_plotly()
 
@@ -1213,20 +1149,13 @@ Run an experiment.
 ```{r, eval = FALSE}
 
 res_1 <- vi_sim_run(n = 500, p = 1, runs = 1000)
-
-res_1 %>%
- group_by(model_vi) %>%
- summarize(correct = mean(z1 < x1))
-
 write_rds(res_1, 'index_cache_manual/vi_sim_res_1.rds')
 
 res_2 <- vi_sim_run(n = 500, p = 50, runs = 1000)
-
-res_2 %>%
- group_by(model_vi) %>%
- summarize(error = mean(z1 > x1))
-
 write_rds(res_2, 'index_cache_manual/vi_sim_res_2.rds')
+
+res_3 <- vi_sim_run(n = 500, p = 50, categorical = T, runs = 1000)
+write_rds(res_3, 'index_cache_manual/vi_sim_res_3.rds')
 
 ```
 
@@ -1240,7 +1169,7 @@ After running this experiment 1000 times, here is the percentage of runs where e
 
 rspec <- table.glue::round_spec() %>% 
  table.glue::round_using_magnitude(digits = c(2, 1), 
-                                   breaks = c(2, Inf)) %>% 
+                                   breaks = c(10, Inf)) %>% 
  set_names(paste('table.glue', names(.), sep = '.'))
 
 options(rspec)
@@ -1252,7 +1181,6 @@ smry <- read_rds('index_cache_manual/vi_sim_res_1.rds') %>%
  separate(model_vi, into = c('model', 'vi')) %>% 
  mutate(incorrect = 100-correct) %>% 
  select(-correct) 
-
 
 smry %>% 
  mutate(ratio = incorrect / min(incorrect), 
@@ -1322,6 +1250,43 @@ smry %>%
 ```
 
 ---
+
+## Correlated and nominal
+
+If we turn all the $x$ and $z$ variables into 4 categories, these are the results we get:
+
+```{r}
+
+smry <- read_rds('index_cache_manual/vi_sim_res_3.rds') %>%
+ pivot_longer(cols = -c(model_vi, run)) %>%
+ mutate(true_var = factor(grepl('^x', name),
+                          levels = c(FALSE, TRUE),
+                          labels = c("junk", "signal"))) %>%
+ group_by(model_vi, run) %>%
+ roc_auc(truth = true_var, value, event_level = 'second') %>%
+ group_by(model_vi) %>%
+ summarize(incorrect = 100 - 100 * mean(.estimate)) %>% 
+ separate(model_vi, into = c('model', 'vi')) %>% 
+ arrange(incorrect)
+
+
+smry %>% 
+ mutate(ratio = incorrect / min(incorrect), 
+        incorrect = table.glue::table_value(incorrect),
+        ratio = table.glue::table_value(ratio),
+        ratio = str_replace(ratio, "1.00", "Reference")) %>% 
+ knitr::kable(col.names = c("Model", 
+                            "Variable importance", 
+                            "% Incorrect",
+                            "Ratio"),
+              align = "llcc") %>% 
+ kableExtra::kable_material(lightable_options = c("hover"),
+                            full_width = TRUE)
+
+```
+
+
+---
 class: inverse, center, middle
 
 # Closing
@@ -1332,21 +1297,19 @@ class: inverse, center, middle
 
 - Axis based trees and oblique trees are both useful.
 
-- Software for random forests have favored axis based trees. (faster, easier to interpret)
-
-- With `aorsf`, oblique random survival forests are for more accessible
+- Axis based trees have gotten more attention. (faster, easier to interpret)
 
 Variable importance
 
-- Negation and ANOVA importance are unique to oblique random survival forests
+- Negation and ANOVA importance are unique to oblique random forests
 
-- Both have theoretical reason to do well with correlated predictors
+- Both do well with correlated, numeric predictors
 
-- Numerical experiments back up this claim.
+- Simulated experiments back up this claim.
 
 Software
 
-- I maintain `aorsf` and I want it to be fast and user-friendly. Give it a try!
+- `aorsf` is fast and user-friendly. Give it a try!
 
 ```{r eval = FALSE, echo = TRUE}
 
@@ -1355,3 +1318,215 @@ Software
 install.packages('aorsf')
 
 ```
+
+---
+
+## Thank you!
+
+This research was supported by the Center for Biomedical Informatics, Wake Forest University School of Medicine and the National Center for Advancing Translational Sciences (NCATS), National Institutes of Health, through Grant Award Number UL1TR001420. The content is solely the responsibility of the authors and does not necessarily represent the official views of the NIH. 
+
+---
+background-image: url(img/orsf_collaborators.svg)
+background-size: 90%
+
+---
+
+---
+class: center, middle
+
+# .huge[BONUS ROUND]
+
+```{r}
+
+mesa_aric <- 
+ readr::read_csv('../aorsf-bench/data/mesa_and_aric.csv') %>% 
+ filter(Race == 'W') %>% 
+ select(-ID, -Race, -LVEF, -LVMi, -QTc, -CV, -LVHcv, -LVHsl, -LAnova) %>% 
+ mutate(across(where(is.character), as.factor),
+        Smoking = factor(Smoking),
+        Alcohol = factor(Alcohol),
+        NTproBNP = log(NTproBNP)) 
+
+mesa <- filter(mesa_aric, database == 'mesa') %>% 
+ select(-database,
+        -VisitDate,
+        -matches(".*_death$|.*_chd$|.*_stroke$")) %>% 
+ drop_na()
+
+aric <- filter(mesa_aric, database == 'aric') %>% 
+ select(-database,
+        -VisitDate,
+        -matches(".*_death$|.*_chd$|.*_stroke$")) %>% 
+ drop_na()
+
+set.seed(329)
+
+
+
+```
+
+---
+
+## Censoring
+
+```{r out.width='90%', echo=FALSE, fig.align='center'}
+knitr::include_graphics('img/ml-supervised-8.svg')
+```
+
+---
+class: middle
+
+Discrimination and calibration of **models** for predicting 10-Year risk of developing heart failure in the **external validation cohorts among black adults**
+
+```{r}
+
+# Black adults
+
+tribble(
+ ~cohort, ~model, ~colname, ~value,
+ "ARIC", "oRSF",	"C-statistic", "0.80",	
+ "ARIC", "oRSF",	"GND P-value", "0.26",
+ "ARIC", "oRSF",	"DeLong test P-value", "Ref",
+ "MESA/DHS", "oRSF",	"C-statistic", "0.83",
+ "MESA/DHS", "oRSF",	"GND P-value", "0.17",
+ "MESA/DHS", "oRSF",	"DeLong test P-value", "Ref",
+ "ARIC", "ARIC-HF risk score", "C-statistic",	"0.77",
+ "ARIC", "ARIC-HF risk score", "GND P-value",	"0.35",
+ "ARIC", "ARIC-HF risk score", "DeLong test P-value",	"<0.001",
+ "MESA/DHS", "ARIC-HF risk score", "C-statistic",	"0.80",
+ "MESA/DHS", "ARIC-HF risk score", "GND P-value",	"<0.001",
+ "MESA/DHS", "ARIC-HF risk score", "DeLong test P-value",	"0.01",
+ "ARIC", "PCP-HF risk score", "C-statistic", "0.73",
+ "ARIC", "PCP-HF risk score", "GND P-value", "0.07",
+ "ARIC", "PCP-HF risk score", "DeLong test P-value", "<0.001",
+ "MESA/DHS", "PCP-HF risk score", "C-statistic", "0.75",
+ "MESA/DHS", "PCP-HF risk score", "GND P-value", "0.04",
+ "MESA/DHS", "PCP-HF risk score", "DeLong test P-value", "<0.001",
+ "ARIC", "MESA-HF risk score", "C-statistic", "0.72",
+ "ARIC", "MESA-HF risk score", "GND P-value", "0.55",
+ "ARIC", "MESA-HF risk score", "DeLong test P-value", "<0.001",
+ "MESA/DHS", "MESA-HF risk score", "C-statistic", "0.78",
+ "MESA/DHS", "MESA-HF risk score", "GND P-value", "0.54",
+ "MESA/DHS", "MESA-HF risk score", "DeLong test P-value", "0.006"
+) %>% 
+ pivot_wider(names_from = c(cohort, colname), values_from = value) %>% 
+ gt(rowname_col = 'model') %>% 
+ tab_spanner_delim(delim = '_') %>% 
+ tab_stubhead("Model") %>% 
+ cols_align('center') %>% 
+ tab_source_note(
+  html("ARIC indicates Atherosclerosis Risk in Communities; DHS, Dallas Heart Study; GND, Greenwood-Nam-D’Agostino; HF, heart failure; JHS, Jackson Heart Study; MESA, Multi-Ethnic Study of Atherosclerosis; ML, machine learning; PCP-HF, Pooled Cohort Equations-Heart Failure; and Ref, reference.<br/>The DeLong test of C-statistic compared other models with the oRSF model.")
+ )
+
+```
+
+---
+class: middle
+
+Discrimination and calibration of **models** for predicting 10-year risk of developing heart failure in the **external validation cohorts (MESA & DHS) among white adults**
+
+```{r}
+
+# White adults
+
+tribble(
+ ~ model, ~colname, ~value,
+ "oRSF", "C-statistic", "0.82",
+ "oRSF", "GND P-value", "0.27",
+ "oRSF", "DeLong test P-value", "Ref",
+ "ARIC-HF risk score",	"C-statistic", "0.79",
+ "ARIC-HF risk score",	"GND P-value", "0.001",
+ "ARIC-HF risk score",	"DeLong test P-value", "0.008",
+ "PCP-HF risk score", "C-statistic", "0.75",
+ "PCP-HF risk score", "GND P-value", "0.01",
+ "PCP-HF risk score", "DeLong test P-value", "<0.001",
+ "MESA-HF risk score", "C-statistic", "0.80",
+ "MESA-HF risk score", "GND P-value", "0.40",
+ "MESA-HF risk score", "DeLong test P-value", "0.044"
+) %>% 
+ pivot_wider(names_from = c(colname), values_from = value) %>% 
+ gt(rowname_col = 'model') %>% 
+ tab_stubhead("Model") %>% 
+ cols_align('center') %>% 
+ tab_source_note(
+  html("ARIC indicates Atherosclerosis Risk in Communities; DHS, Dallas Heart Study; GND, Greenwood-Nam-D’Agostino; HF, heart failure; JHS, Jackson Heart Study; MESA, Multi-Ethnic Study of Atherosclerosis; ML, machine learning; PCP-HF, Pooled Cohort Equations-Heart Failure; and Ref, reference.<br/>The DeLong test of C-statistic compared other models with the oRSF model.")
+ )
+
+
+
+
+```
+
+---
+
+## How do you use aorsf?
+
+```{r echo=TRUE, cache=TRUE}
+
+library(aorsf)
+library(survival)
+library(SurvMetrics)
+
+fit <- orsf(data = aric, 
+            formula = Surv(time_hf, censor_hf) ~ .,
+            importance = 'negate')
+
+preds <- predict(fit, 
+                 new_data = mesa,
+                 pred_type = 'surv',
+                 pred_horizon = 10)
+
+Cindex(with(mesa, Surv(time_hf, censor_hf)), 
+       predicted = preds,
+       t_star = 10)
+
+```
+
+---
+
+```{r, echo=TRUE}
+
+enframe(orsf_vi(fit))
+
+```
+
+
+---
+## How do you use aorsf?
+
+```{r, echo=TRUE, cache=TRUE}
+
+pd <- fit %>% 
+ orsf_pd_oob(
+  pred_type = 'risk',
+  pred_horizon = 10,
+  pred_spec = list(Sex = c("F","M"), 
+                   NTproBNP = seq(log(20), log(210), by = .2))
+ )
+
+as_tibble(pd)
+
+```
+
+---
+
+## How do you use aorsf?
+
+```{r}
+ggplot(pd) + 
+ aes(x = NTproBNP, y = mean, 
+     color = fct_reorder2(Sex, .x = NTproBNP, .y = mean)) + 
+ geom_line(size = 1.2) +
+ theme_bw() +
+ theme(panel.grid = element_blank()) +
+ scale_color_manual(values = c("orange", "purple")) +
+ labs(x = 'log NP levels',
+      y = 'Mean predicted 10-year HF risk',
+      color = 'Sex')
+```
+
+
+
+
+
+

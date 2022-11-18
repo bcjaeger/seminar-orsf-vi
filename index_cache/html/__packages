@@ -26,3 +26,10 @@ mlr3viz
 mlr3benchmark
 magrittr
 aorsf
+gt
+simsurv
+survival
+yardstick
+tidyselect
+SurvMetrics
+randomForestSRC
