@@ -664,6 +664,11 @@ Key things about *obliqueRSF*:
 
 
 ---
+class: center, middle
+background-image: url("img/meme_slow_R.jpg")
+background-size: contain
+
+---
 
 ## Oblique random survival forests
 
@@ -864,6 +869,7 @@ results <-
   row.names = c(NA, -3L),
   class = c("tbl_df", "tbl", "data.frame")
  ) %>% 
+ arrange(desc(surv.cindex)) %>% 
  mutate(across(.cols = c(surv.cindex, surv.calib_alpha,
                          surv.graf, time_train),
                .fns = table.glue::table_value),
@@ -898,7 +904,8 @@ After running 10-fold cross validation on each of the 11 tasks, here is the mean
 results %>% 
  select(learner_id,
         surv.graf,
-        time_train) %>% 
+        time_train) %>%
+ arrange(surv.graf) %>% 
  knitr::kable(col.names = c("Learner", 
                             "Graf score (lower is better)",
                             "Train time (lower is better)"),
@@ -1289,7 +1296,7 @@ smry %>%
 ---
 class: inverse, center, middle
 
-# Closing
+# Conclusions
 
 ---
 
@@ -1299,13 +1306,14 @@ class: inverse, center, middle
 
 - Axis based trees have gotten more attention. (faster, easier to interpret)
 
+- This work makes oblique survival trees faster and easier to interpret
+
 Variable importance
 
 - Negation and ANOVA importance are unique to oblique random forests
 
 - Both do well with correlated, numeric predictors
 
-- Simulated experiments back up this claim.
 
 Software
 
